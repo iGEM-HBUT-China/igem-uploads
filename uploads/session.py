@@ -69,7 +69,7 @@ class Session:
 
     def query(self, directory=''):
         """
-        query files/dirs in specific directory
+        query a files/dirs in specific directory
         :param directory: (optional) directory to query, default to root directory(/)
         :return: list of files, each file/dir as a dict
         """
@@ -131,8 +131,9 @@ class Session:
 
     def upload_dir(self, abs_path, directory=''):
         """
-        upload directory to specific directory
+        upload a directory and its subdirectories to specific directory
         :param abs_path: absolute path of directory
+        :param directory: (optional) target directory, default to root directory(/)
         :return: list of files, each file/dir as a dict
         """
         path_to_dir = Path(abs_path)
@@ -172,7 +173,7 @@ class Session:
 
     def truncate_dir(self, directory):
         """
-        truncate directory
+        truncate a directory
         :param directory: directory to truncate
         :return: list files after truncate
         """
