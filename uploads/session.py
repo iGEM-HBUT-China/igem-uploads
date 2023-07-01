@@ -1,7 +1,9 @@
 import mimetypes
 import os
 import warnings
+from pathlib import Path
 
+import prettytable as pt
 import requests
 from lxml import etree
 
@@ -15,11 +17,11 @@ class Session:
     status = NOT_LOGGED_IN
     team_id = ''
 
-    def request(self, method, url, data=None):
+    def request(self, method, url, data=None, files=None):
         if self.status != LOGGED_IN:
             warnings.warn('Not logged in, please login first')
             exit(1)
-        return self.requests_session_instance.request(method=method, url=url, data=data, verify=False)
+        return self.requests_session_instance.request(method=method, url=url, data=data, files=files)
 
     def request_team_id(self):
         response = self.requests_session_instance.request('GET', 'https://old.igem.org/aj/session_info?use_my_cookie=1')
@@ -34,7 +36,7 @@ class Session:
         team_year = main_team['team_year']
         team_role = main_team['team_role']
         team_role_status = main_team['team_role_status']
-        print('Your team info:', team_id, team_name, team_year)
+        print('Your team:', team_id, team_name, team_year)
         print('Your role:', team_role)
         if team_status != 'Accepted':
             warnings.warn('Your team is not accepted')
@@ -43,6 +45,11 @@ class Session:
         return team_id
 
     def login(self, username, password):
+        """
+        login to igem.org
+        :param username: your username
+        :param password: your password
+        """
         data = {
             "username": username,
             "password": password,
@@ -60,104 +67,119 @@ class Session:
             warnings.warn(err_info)
             exit(1)
 
-    # TODO 以下代码逻辑待优化，igem接口响应数据有所改变
     def query(self, directory=''):
         """
-        在指定目录下查找
-        :param directory: 要查找的目录，默认为根目录
-        :return: 文件的list/空list
+        query files/dirs in specific directory
+        :param directory: (optional) directory to query, default to root directory(/)
+        :return: list of files, each file/dir as a dict
         """
-        warnings.warn("this implement is outdated", DeprecationWarning)
-        data = dict(directory=directory)
-        response = self.request('GET', 'https://shim-s3.igem.org/v1/teams/' + self.team_id + '/wiki', data=data)
+        response = self.request('GET', f'https://shim-s3.igem.org/v1/teams/{self.team_id}/wiki?directory={directory}')
         res = response.json()
         if res['KeyCount'] > 0:
-            print(directory, '查询成功', res['KeyCount'])
-            for i in res['Contents']:
-                print(i['Name'], i['Location'])
-            print()
-            return res['Contents']
-        else:
-            print(directory, '查询为空')
-            print()
+            print(directory if directory != '' else '/', 'found:', res['KeyCount'])
+            contents = []
+            if res.get('CommonPrefixes', False):
+                contents.extend(sorted(res['CommonPrefixes'], key=lambda x: x['Name']))
+            if res.get('Contents', False):
+                contents.extend(sorted(res['Contents'], key=lambda x: (x['Type'], x['Name'])))
+            table = pt.PrettyTable()
+            table.field_names = ["Type", "Name", "DirectoryKey/FileURL"]
+            for item in contents:
+                if item['Type'] == 'Folder':
+                    table.add_row(['Folder', item['Name'], item['Key'].split(f'teams/{self.team_id}/wiki/')[-1]])
+                else:
+                    table.add_row(['File-' + item['Type'], item['Name'], item['Location']])
+            print(table)
+            return contents
+        elif res['KeyCount'] == 0:
+            print(directory if directory != '' else '/', 'found:', res['KeyCount'])
             return []
+        else:
+            warnings.warn('Query failed')
+            exit(1)
 
-    def upload(self, abs_file_path, directory='', list=True):
+    def upload(self, abs_file_path, directory='', list_files=True):
         """
-        上传文件到指定目录
-        :param abs_file_path: 文件的绝对路径
-        :param directory: 文件的目录，默认为根目录
-        :param list: 是否查询
-        :return: 文件的URL/False
+        upload file to specific directory
+        :param abs_file_path: absolute path of file
+        :param directory: (optional) target directory, default to root directory(/)
+        :param list_files: (optional) need to list files after upload, default to True
+        :type list_files: bool
+        :return: file url
         """
-        warnings.warn("this implement is outdated", DeprecationWarning)
-        filename = abs_file_path.split('\\')[-1]
-        mime_type = mimetypes.guess_type(filename, True)[0]
+        path_to_file = Path(abs_file_path)
+        if not path_to_file.is_file():
+            warnings.warn('Invalid file path: ' + abs_file_path)
+            exit(1)
+        mime_type = mimetypes.guess_type(abs_file_path, True)[0]
         data = {
             'directory': directory
         }
         files = {
-            'file': (filename, open(abs_file_path, 'rb'), mime_type)
+            'file': (path_to_file.name, open(abs_file_path, 'rb'), mime_type)
         }
-        res = self.requests_session_instance. \
-            request('POST', 'https://shim-s3.igem.org/v1/teams/' + self.team_id + '/wiki', data=data, files=files)
+        res = self.request('POST', f'https://shim-s3.igem.org/v1/teams/{self.team_id}/wiki',
+                           data=data, files=files)
         if res.status_code == 201:
-            print(filename, '上传成功', res.json()['location'])
+            print(path_to_file.name, 'uploaded', res.json()['location'])
             print()
-            if list:
+            if list_files:
                 self.query(directory)
             return res.json()['location']
         else:
-            print(res.text)
-            print(filename, '上传失败')
-            print()
-            return False
+            warnings.warn('Upload failed' + res.text)
 
-    def upload_dir(self, abs_path):
+    def upload_dir(self, abs_path, directory=''):
         """
-        上传目录
-        :param abs_path: 目录的绝对路径
-        :return: 目录下文件的list/空list
+        upload directory to specific directory
+        :param abs_path: absolute path of directory
+        :return: list of files, each file/dir as a dict
         """
-        warnings.warn("this implement is outdated", DeprecationWarning)
+        path_to_dir = Path(abs_path)
+        if not path_to_dir.is_dir():
+            warnings.warn('Invalid directory path: ' + abs_path)
+            exit(1)
         file_list = os.listdir(abs_path)
-        for filename in file_list:
-            self.upload(abs_path + '\\' + filename, abs_path.split('\\')[-1], False)
-        return self.query(abs_path.split('\\')[-1])
-
-    def delete(self, filename, directory='', list=True):
-        """
-        删除某目录下的文件
-        :param filename: 文件名
-        :param directory: 文件的目录，默认为根目录
-        :param list: 是否查询
-        :return: True/False
-        """
-        warnings.warn("this implement is outdated", DeprecationWarning)
-        data = dict(directory=directory)
-        res = self.requests_session_instance. \
-            request('DELETE',
-                    'https://shim-s3.igem.org/v1/teams/' + self.team_id + '/wiki/' + filename, data=data)
-        if res.status_code == 200:
-            print(directory + '/' + filename, '删除成功')
-            print()
-            if list:
-                self.query(directory)
-            return True
+        if directory == '':
+            dir_path = path_to_dir.name
         else:
-            print(directory + '/' + filename, '删除失败')
-            print()
-            return False
+            dir_path = directory + '/' + path_to_dir.name
+        for filename in file_list:
+            if filename.startswith('.'):
+                continue
+            if (path_to_dir / filename).is_file():
+                self.upload(path_to_dir / filename, dir_path, False)
+            if (path_to_dir / filename).is_dir():
+                self.upload_dir(path_to_dir / filename, dir_path)
+        return self.query(dir_path)
 
-    def clear_dir(self, directory):
+    def delete(self, filename, directory='', list_files=True):
         """
-        清空目录
-        :param directory: 目录
-        :return: 清空后目录下的文件
+        delete file in specific directory
+        :param filename: filename
+        :param directory: file parent directory, default to root directory(/)
+        :param list_files: need to list files after delete, default to True
         """
-        warnings.warn("this implement is outdated", DeprecationWarning)
-        files = self.query(directory)
-        print(files)
-        for file in files:
-            self.delete(file['Name'], directory, False)
+        res = self.request('DELETE',
+                           f'https://shim-s3.igem.org/v1/teams/{self.team_id}/wiki/{filename}?directory={directory}')
+        if res.status_code == 200:
+            print(directory + '/' + filename, 'deleted')
+            print()
+            if list_files:
+                self.query(directory)
+        else:
+            warnings.warn(directory + '/' + filename + ' delete failed')
+
+    def truncate_dir(self, directory):
+        """
+        truncate directory
+        :param directory: directory to truncate
+        :return: list files after truncate
+        """
+        contents = self.query(directory)
+        for item in contents:
+            if item['Type'] == 'Folder':
+                self.truncate_dir(directory + '/' + item['Name'])
+            else:
+                self.delete(item['Name'], directory, False)
         return self.query(directory)
