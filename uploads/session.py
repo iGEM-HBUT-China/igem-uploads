@@ -12,12 +12,21 @@ LOGGED_IN = 1
 LOGGED_FAILED = -1
 
 
+def check_parameter(directory: str):
+    if directory.count('/') == len(directory):
+        warnings.warn('You specified \'/\' as a directory name, which may cause unknown errors')
+        exit(1)
+    if directory.startswith('/'):
+        warnings.warn('You specified a directory name starting with \'/\', which may cause unknown errors')
+        exit(1)
+
+
 class Session:
     requests_session_instance = requests.session()
     status = NOT_LOGGED_IN
     team_id = ''
 
-    def request(self, method, url, data=None, files=None):
+    def request(self, method: str, url: str, data=None, files=None):
         if self.status != LOGGED_IN:
             warnings.warn('Not logged in, please login first')
             exit(1)
@@ -44,7 +53,7 @@ class Session:
             warnings.warn('Your team role is not accepted')
         return team_id
 
-    def login(self, username, password):
+    def login(self, username: str, password: str):
         """
         login to igem.org
         :param username: your username
@@ -67,12 +76,13 @@ class Session:
             warnings.warn(err_info)
             exit(1)
 
-    def query(self, directory=''):
+    def query(self, directory: str = ''):
         """
         query a files/dirs in specific directory
         :param directory: (optional) directory to query, default to root directory
         :return: list of files, each file/dir as a dict
         """
+        check_parameter(directory)
         response = self.request('GET', f'https://shim-s3.igem.org/v1/teams/{self.team_id}/wiki?directory={directory}')
         res = response.json()
         if res['KeyCount'] > 0:
@@ -98,7 +108,7 @@ class Session:
             warnings.warn('Query failed')
             exit(1)
 
-    def upload(self, abs_file_path, directory='', list_files=True):
+    def upload(self, abs_file_path: str, directory: str = '', list_files: bool = True):
         """
         upload file to specific directory
         :param abs_file_path: absolute path of file
@@ -107,6 +117,10 @@ class Session:
         :type list_files: bool
         :return: file url
         """
+        check_parameter(directory)
+        if directory == '/':
+            warnings.warn('You specified \'/\' as a directory name, which may cause unknown errors')
+            exit(1)
         path_to_file = Path(abs_file_path)
         if not path_to_file.is_file():
             warnings.warn('Invalid file path: ' + abs_file_path)
@@ -129,13 +143,17 @@ class Session:
         else:
             warnings.warn('Upload failed' + res.text)
 
-    def upload_dir(self, abs_path, directory=''):
+    def upload_dir(self, abs_path: str, directory: str = ''):
         """
         upload a directory and its subdirectories to specific directory
         :param abs_path: absolute path of directory
         :param directory: (optional) target directory, default to root directory
         :return: list of files, each file/dir as a dict
         """
+        check_parameter(directory)
+        if directory == '/':
+            warnings.warn('You specified \'/\' as a directory name, which may cause unknown errors')
+            exit(1)
         path_to_dir = Path(abs_path)
         if not path_to_dir.is_dir():
             warnings.warn('Invalid directory path: ' + abs_path)
@@ -154,13 +172,17 @@ class Session:
                 self.upload_dir(path_to_dir / filename, dir_path)
         return self.query(dir_path)
 
-    def delete(self, filename, directory='', list_files=True):
+    def delete(self, filename: str, directory: str = '', list_files: bool = True):
         """
         delete file in specific directory
         :param filename: filename
         :param directory: file parent directory, default to root directory
         :param list_files: need to list files after delete, default to True
         """
+        check_parameter(directory)
+        if directory == '/':
+            warnings.warn('You specified \'/\' as a directory name, which may cause unknown errors')
+            exit(1)
         res = self.request('DELETE',
                            f'https://shim-s3.igem.org/v1/teams/{self.team_id}/wiki/{filename}?directory={directory}')
         if res.status_code == 200:
@@ -171,7 +193,7 @@ class Session:
         else:
             warnings.warn(directory + '/' + filename + ' delete failed')
 
-    def truncate_dir(self, directory):
+    def truncate_dir(self, directory: str):
         """
         truncate a directory
         :param directory: directory to truncate
