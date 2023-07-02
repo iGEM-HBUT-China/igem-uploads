@@ -70,7 +70,7 @@ class Session:
     def query(self, directory=''):
         """
         query a files/dirs in specific directory
-        :param directory: (optional) directory to query, default to root directory(/)
+        :param directory: (optional) directory to query, default to root directory
         :return: list of files, each file/dir as a dict
         """
         response = self.request('GET', f'https://shim-s3.igem.org/v1/teams/{self.team_id}/wiki?directory={directory}')
@@ -102,7 +102,7 @@ class Session:
         """
         upload file to specific directory
         :param abs_file_path: absolute path of file
-        :param directory: (optional) target directory, default to root directory(/)
+        :param directory: (optional) target directory, default to root directory
         :param list_files: (optional) need to list files after upload, default to True
         :type list_files: bool
         :return: file url
@@ -133,7 +133,7 @@ class Session:
         """
         upload a directory and its subdirectories to specific directory
         :param abs_path: absolute path of directory
-        :param directory: (optional) target directory, default to root directory(/)
+        :param directory: (optional) target directory, default to root directory
         :return: list of files, each file/dir as a dict
         """
         path_to_dir = Path(abs_path)
@@ -158,7 +158,7 @@ class Session:
         """
         delete file in specific directory
         :param filename: filename
-        :param directory: file parent directory, default to root directory(/)
+        :param directory: file parent directory, default to root directory
         :param list_files: need to list files after delete, default to True
         """
         res = self.request('DELETE',
