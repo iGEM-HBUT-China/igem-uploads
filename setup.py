@@ -7,8 +7,8 @@ requirements = ["wheel"]
 
 setup(
     name="igem-uploads",
-    version="0.0.1",
-    author="lty2002",
+    version="1.0.0",
+    author="iGEM-HBUT-China",
     author_email="liangtianyi2002@outlook.com",
     description="Helps iGEMers upload their files to the iGEM server.",
     long_description=readme,
@@ -18,6 +18,6 @@ setup(
     install_requires=requirements,
     classifiers=[
         "Programming Language :: Python :: 3.8",
-        "License :: OSI Approved :: MIT License",
+        "License :: OSI Approved",
     ],
 )
