@@ -7,7 +7,7 @@ requirements = ["wheel"]
 
 setup(
     name="igem-uploads",
-    version="1.1.0",
+    version="1.1.1",
     author="iGEM-HBUT-China",
     author_email="liangtianyi2002@outlook.com",
     description="Helps iGEMers upload their files to the iGEM server.",
