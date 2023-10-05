@@ -13,9 +13,6 @@ LOGGED_FAILED = -1
 
 
 def check_parameter(directory: str):
-    if directory.count('/') == len(directory):
-        warnings.warn('You specified \'/\' as a directory name, which may cause unknown errors')
-        exit(1)
     if directory.startswith('/'):
         warnings.warn('You specified a directory name starting with \'/\', which may cause unknown errors')
         exit(1)
