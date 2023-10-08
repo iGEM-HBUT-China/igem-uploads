@@ -3,11 +3,15 @@ from setuptools import setup, find_packages
 with open("README.md", "r") as readme_file:
     readme = readme_file.read()
 
-requirements = ["wheel"]
+requirements = [
+    "prettytable",
+    "requests",
+    "lxml"
+]
 
 setup(
     name="igem-uploads",
-    version="1.1.3",
+    version="1.1.4",
     author="iGEM-HBUT-China",
     author_email="liangtianyi2002@outlook.com",
     description="Helps iGEMers upload their files to the iGEM server.",
