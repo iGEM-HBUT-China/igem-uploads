@@ -70,7 +70,7 @@ client.login('username', 'password')
 
 ### 1. Upload single file to specific directory
 
-You can upload a file in a specified local directory to a remote directory. Files will be upload to remote root if you
+You can upload a file in a specified local directory to a remote directory. Files will be uploaded to remote root if you
 omit the _target_directory_ argument.
 
 ```python
@@ -91,7 +91,7 @@ client.query('directory')
 ### 3. Upload directory to specific directory
 
 If you want to upload a directory and its subdirectories to specific directory, you can use _upload_dir_. All items in
-the dir you specified will be upload to remote root is _target_directory_ is omitted.
+the dir you specified will be uploaded to remote root is _target_directory_ is omitted.
 
 ```python
 client.upload_dir('path/to/directory')
@@ -113,14 +113,6 @@ To truncate a directory, call _truncate_ and specify it.
 ```python
 client.truncate_dir('target_directory')
 ```
-
-## Conclusion
-
-Through promotion through multiple channels (Slack, Twitter, China iGEMer Community, etc.), our software has been
-downloaded and used many times. See this [link](https://pypistats.org/packages/igem-uploads).
-
-![](https://static.igem.wiki/teams/4687/wiki/content-pages/software/04-software.png)
-![](https://static.igem.wiki/teams/4687/wiki/content-pages/software/05-software.png)
 
 ## Contributing
 
