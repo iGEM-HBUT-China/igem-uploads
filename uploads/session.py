@@ -1,5 +1,6 @@
 import mimetypes
 import os
+import threading
 import warnings
 from pathlib import Path
 
@@ -16,6 +17,24 @@ def check_parameter(directory: str):
     if directory.startswith('/'):
         warnings.warn('You specified a directory name starting with \'/\', which may cause unknown errors')
         exit(1)
+
+
+def download_single_file(file_url: str, target_dir: str = ''):
+    # get file name from url
+    file_name = os.path.basename(file_url)
+
+    # local file path
+    file_path = os.path.join(target_dir, file_name)
+
+    # download file
+    response = requests.get(file_url)
+    if response.status_code == 200:
+        # save file
+        with open(file_path, 'wb') as file:
+            file.write(response.content)
+        return True
+    else:
+        return False
 
 
 class Session:
@@ -73,17 +92,19 @@ class Session:
             warnings.warn(err_info)
             exit(1)
 
-    def query(self, directory: str = ''):
+    def query(self, directory: str = '', output: bool = True):
         """
         query a files/dirs in specific directory
         :param directory: (optional) directory to query, default to root directory
+        :param output: (optional) need to print query result, default to True
         :return: list of files, each file/dir as a dict
         """
         check_parameter(directory)
         response = self.request('GET', f'https://shim-s3.igem.org/v1/teams/{self.team_id}/wiki?directory={directory}')
         res = response.json()
         if res['KeyCount'] > 0:
-            print(directory if directory != '' else '/', 'found:', res['KeyCount'])
+            if output:
+                print(directory if directory != '' else '/', 'found:', res['KeyCount'])
             contents = []
             if res.get('CommonPrefixes', False):
                 contents.extend(sorted(res['CommonPrefixes'], key=lambda x: x['Name']))
@@ -96,7 +117,8 @@ class Session:
                     table.add_row(['Folder', item['Name'], item['Key'].split(f'teams/{self.team_id}/wiki/')[-1]])
                 else:
                     table.add_row(['File-' + item['Type'], item['Name'], item['Location']])
-            print(table)
+            if output:
+                print(table)
             return contents
         elif res['KeyCount'] == 0:
             print(directory if directory != '' else '/', 'found:', res['KeyCount'])
@@ -203,3 +225,28 @@ class Session:
             else:
                 self.delete(item['Name'], directory, False)
         return self.query(directory)
+
+    def download_dir(self, directory: str = '', files_only: bool = True):
+        contents = self.query(directory, False)
+        if len(contents) == 0:
+            print(f'Directory {directory} is empty')
+            return
+        else:
+            local_target_directory = f'teams/{self.team_id}/wiki/{directory}'
+            os.makedirs(local_target_directory, exist_ok=True)
+        # multi-threading operating
+        threads = []
+        for item in contents:
+            if item['Type'] == 'Folder':
+                if files_only:
+                    continue
+                self.download_dir(item['Prefix'].split(f'teams/{self.team_id}/wiki/')[1], files_only)
+                continue
+            thread = threading.Thread(target=download_single_file,
+                                      args=(item['Location'], local_target_directory))
+            thread.start()
+            threads.append(thread)
+        for thread in threads:
+            thread.join()
+        directory = directory if directory != '' else '/'
+        print(f'Download {len(threads)} files in {directory}\n')
