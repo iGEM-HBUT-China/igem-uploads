@@ -6,7 +6,6 @@ from pathlib import Path
 
 import prettytable as pt
 import requests
-from lxml import etree
 
 NOT_LOGGED_IN = 0
 LOGGED_IN = 1
@@ -42,30 +41,32 @@ class Session:
     status = NOT_LOGGED_IN
     team_id = ''
 
-    def request(self, method: str, url: str, data=None, files=None):
+    def request(self, method: str, url: str, params=None, data=None, files=None):
         if self.status != LOGGED_IN:
             warnings.warn('Not logged in, please login first')
             exit(1)
-        return self.requests_session_instance.request(method=method, url=url, data=data, files=files)
+        return self.requests_session_instance.request(method=method, url=url, params=params, data=data, files=files)
 
     def request_team_id(self):
-        response = self.requests_session_instance.request('GET', 'https://old.igem.org/aj/session_info?use_my_cookie=1')
-        team_list = response.json()['teams']
+        response = self.requests_session_instance.request('GET', 'https://api.igem.org/v1/teams/memberships/mine',
+                                                          params={"onlyAcceptedTeams": True})
+        team_list = response.json()
         if len(team_list) == 0:
             warnings.warn('Not joined any team')
             exit(1)
-        main_team = team_list[0]
-        team_id = main_team['team_id']
-        team_name = main_team['team_name']
-        team_status = main_team['team_status']
-        team_year = main_team['team_year']
-        team_role = main_team['team_role']
-        team_role_status = main_team['team_role_status']
+        main_team = team_list[0]['team']
+        main_membership = team_list[0]['membership']
+        team_id = main_team['id']
+        team_name = main_team['name']
+        team_status = main_team['status']
+        team_year = main_team['year']
+        team_role = main_membership['role']
+        team_role_status = main_membership['status']
         print('Your team:', team_id, team_name, team_year)
         print('Your role:', team_role)
-        if team_status != 'Accepted':
+        if team_status != 'accepted':
             warnings.warn('Your team is not accepted')
-        if team_role_status != 'Accepted':
+        if team_role_status != 'accepted':
             warnings.warn('Your team role is not accepted')
         return team_id
 
@@ -76,21 +77,17 @@ class Session:
         :param password: your password
         """
         data = {
-            "username": username,
-            "password": password,
-            "Login": "Login",
-            "return_to": "https://igem.org"
+            "identifier": username,
+            "password": password
         }
-        response = self.requests_session_instance.post('https://old.igem.org/Login2', data=data)
-        if response.text.__contains__('successfully'):
+        response = self.requests_session_instance.post('https://api.igem.org/v1/auth/sign-in', data=data)
+        if response.text.__contains__('Invalid credentials'):
+            self.status = LOGGED_FAILED
+            warnings.warn('Invalid credentials')
+            exit(1)
+        else:
             self.status = LOGGED_IN
             self.team_id = self.request_team_id()
-        else:
-            self.status = LOGGED_FAILED
-            tree = etree.HTML(response.text)
-            err_info = str(tree.xpath('/html/body/form/div[1]')[0].text).split('.')[0] + '.'
-            warnings.warn(err_info)
-            exit(1)
 
     def query(self, directory: str = '', output: bool = True):
         """
@@ -100,7 +97,8 @@ class Session:
         :return: list of files, each file/dir as a dict
         """
         check_parameter(directory)
-        response = self.request('GET', f'https://shim-s3.igem.org/v1/teams/{self.team_id}/wiki?directory={directory}')
+        response = self.request('GET', f'https://api.igem.org/v1/websites/teams/{self.team_id}',
+                                params={'directory': directory} if directory != '' else None)
         res = response.json()
         if res['KeyCount'] > 0:
             if output:
@@ -114,7 +112,7 @@ class Session:
             table.field_names = ["Type", "Name", "DirectoryKey/FileURL"]
             for item in contents:
                 if item['Type'] == 'Folder':
-                    table.add_row(['Folder', item['Name'], item['Key'].split(f'teams/{self.team_id}/wiki/')[-1]])
+                    table.add_row(['Folder', item['Name'], item['Key'].split(f'teams/{self.team_id}/')[-1]])
                 else:
                     table.add_row(['File-' + item['Type'], item['Name'], item['Location']])
             if output:
@@ -145,20 +143,18 @@ class Session:
             warnings.warn('Invalid file path: ' + abs_file_path)
             exit(1)
         mime_type = mimetypes.guess_type(abs_file_path, True)[0]
-        data = {
-            'directory': directory
-        }
         files = {
             'file': (path_to_file.name, open(abs_file_path, 'rb'), mime_type)
         }
-        res = self.request('POST', f'https://shim-s3.igem.org/v1/teams/{self.team_id}/wiki',
-                           data=data, files=files)
+        res = self.request('POST', f'https://api.igem.org/v1/websites/teams/{self.team_id}',
+                           params={'directory': directory} if directory != '' else None,
+                           files=files)
         if res.status_code == 201:
-            print(path_to_file.name, 'uploaded', res.json()['location'])
+            print(path_to_file.name, 'uploaded', res.text)
             print()
             if list_files:
                 self.query(directory)
-            return res.json()['location']
+            return res.text
         else:
             warnings.warn('Upload failed' + res.text)
 
@@ -182,13 +178,23 @@ class Session:
             dir_path = path_to_dir.name
         else:
             dir_path = directory + '/' + path_to_dir.name
+        # multi-threading operating
+        threads = []
         for filename in file_list:
             if filename.startswith('.'):
                 continue
             if (path_to_dir / filename).is_file():
-                self.upload(path_to_dir / filename, dir_path, False)
+                thread = threading.Thread(target=self.upload,
+                                          args=(f'{path_to_dir}/{filename}', dir_path, False))
+                thread.start()
+                threads.append(thread)
             if (path_to_dir / filename).is_dir():
-                self.upload_dir(path_to_dir / filename, dir_path)
+                thread = threading.Thread(target=self.upload_dir,
+                                          args=(f'{path_to_dir}/{filename}', dir_path))
+                thread.start()
+                threads.append(thread)
+        for thread in threads:
+            thread.join()
         return self.query(dir_path)
 
     def delete(self, filename: str, directory: str = '', list_files: bool = True):
@@ -203,7 +209,8 @@ class Session:
             warnings.warn('You specified \'/\' as a directory name, which may cause unknown errors')
             exit(1)
         res = self.request('DELETE',
-                           f'https://shim-s3.igem.org/v1/teams/{self.team_id}/wiki/{filename}?directory={directory}')
+                           f'https://api.igem.org/v1/websites/teams/{self.team_id}/{filename}',
+                           params={'directory': directory} if directory != '' else None)
         if res.status_code == 200:
             print(directory + '/' + filename, 'deleted')
             print()
@@ -218,6 +225,9 @@ class Session:
         :param directory: directory to truncate
         :return: list files after truncate
         """
+        if directory == '':
+            warnings.warn('Trying to truncate the root directory! Please specify a directory name instead.')
+            exit(1)
         contents = self.query(directory)
         for item in contents:
             if item['Type'] == 'Folder':
@@ -227,12 +237,18 @@ class Session:
         return self.query(directory)
 
     def download_dir(self, directory: str = '', files_only: bool = True):
+        """
+        download a directory and its subdirectories to local
+        :param directory: directory to download
+        :param files_only: whether to download files only, default to True
+        :return: None
+        """
         contents = self.query(directory, False)
         if len(contents) == 0:
             print(f'Directory {directory} is empty')
             return
         else:
-            local_target_directory = f'teams/{self.team_id}/wiki/{directory}'
+            local_target_directory = f'teams/{self.team_id}/{directory}'
             os.makedirs(local_target_directory, exist_ok=True)
         # multi-threading operating
         threads = []
@@ -240,7 +256,7 @@ class Session:
             if item['Type'] == 'Folder':
                 if files_only:
                     continue
-                self.download_dir(item['Prefix'].split(f'teams/{self.team_id}/wiki/')[1], files_only)
+                self.download_dir(item['Prefix'].split(f'teams/{self.team_id}/')[1], files_only)
                 continue
             thread = threading.Thread(target=download_single_file,
                                       args=(item['Location'], local_target_directory))
