@@ -11,7 +11,7 @@ requirements = [
 
 setup(
     name="igem-uploads",
-    version="2.0.0",
+    version="3.0.0-beta",
     author="iGEM-HBUT-China",
     author_email="liangtianyi2002@outlook.com",
     description="Helps iGEMers upload their files to the iGEM server.",

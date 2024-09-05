@@ -18,21 +18,17 @@ def check_parameter(directory: str):
         exit(1)
 
 
-def download_single_file(file_url: str, target_dir: str = ''):
-    # get file name from url
+def download_single_file(file_url: str, target_dir: str = '', session: requests.Session = None):
     file_name = os.path.basename(file_url)
-
-    # local file path
     file_path = os.path.join(target_dir, file_name)
-
-    # download file
     response = requests.get(file_url)
     if response.status_code == 200:
-        # save file
         with open(file_path, 'wb') as file:
             file.write(response.content)
         return True
     else:
+        print(response.content)
+        warnings.warn(f'Download failed: {response.status_code} {file_url}')
         return False
 
 
@@ -40,17 +36,22 @@ class Session:
     requests_session_instance = requests.session()
     status = NOT_LOGGED_IN
     team_id = ''
+    is_staff = False
 
     def request(self, method: str, url: str, params=None, data=None, files=None):
         if self.status != LOGGED_IN:
             warnings.warn('Not logged in, please login first')
             exit(1)
+        if self.is_staff:
+            url = url.replace('/teams', '')
         return self.requests_session_instance.request(method=method, url=url, params=params, data=data, files=files)
 
     def request_team_id(self):
         response = self.requests_session_instance.request('GET', 'https://api.igem.org/v1/teams/memberships/mine',
                                                           params={"onlyAcceptedTeams": True})
         team_list = response.json()
+        team_list = [team for team in team_list if
+                     (team['team']['status'] == 'accepted' and team['membership']['status'] == 'accepted')]
         if len(team_list) == 0:
             warnings.warn('Not joined any team')
             exit(1)
@@ -58,16 +59,10 @@ class Session:
         main_membership = team_list[0]['membership']
         team_id = main_team['id']
         team_name = main_team['name']
-        team_status = main_team['status']
         team_year = main_team['year']
         team_role = main_membership['role']
-        team_role_status = main_membership['status']
         print('Your team:', team_id, team_name, team_year)
         print('Your role:', team_role)
-        if team_status != 'accepted':
-            warnings.warn('Your team is not accepted')
-        if team_role_status != 'accepted':
-            warnings.warn('Your team role is not accepted')
         return team_id
 
     def login(self, username: str, password: str):
@@ -87,7 +82,63 @@ class Session:
             exit(1)
         else:
             self.status = LOGGED_IN
+
+            resp = self.requests_session_instance.get('https://api.igem.org/v1/auth/me')
+            user_info = resp.json()
+            if 'can-manage-staff-uploads' in user_info['privileges']:
+                self.is_staff = True
+                resp = self.requests_session_instance.get('https://api.igem.org/v1/websites/me')
+                websites_list = resp.json()['repositories']
+                print('Your websites:')
+                for index, website in enumerate(websites_list):
+                    print((index + 1), website['path'])
+                print('Please input the websites_id you want to operate:')
+                while True:
+                    try:
+                        user_in = int(input())
+                        if user_in in range(1, len(websites_list) + 1):
+                            self.team_id = websites_list[user_in - 1]['path']
+                            break
+                        else:
+                            print('Invalid websites_id, please input again:')
+                    except ValueError:
+                        print('Invalid input, please input again:')
+                return
             self.team_id = self.request_team_id()
+
+    def staff_login(self, username: str, password: str, website: str = ''):
+        """
+        login to igem.org as staff
+        :param username: your username
+        :param password: your password
+        :param website: website you want to operate
+        """
+        if not website:
+            warnings.warn('Please specify a website to operate')
+            exit(1)
+        data = {
+            "identifier": username,
+            "password": password
+        }
+        response = self.requests_session_instance.post('https://api.igem.org/v1/auth/sign-in', data=data)
+        if response.text.__contains__('Invalid credentials'):
+            self.status = LOGGED_FAILED
+            warnings.warn('Invalid credentials')
+            exit(1)
+        else:
+            self.status = LOGGED_IN
+            self.team_id = f'websites/{website}'
+            self.is_staff = True
+
+    def change_website(self, website: str = ''):
+        """
+        change the website you want to operate
+        :param website: website you want to operate
+        """
+        if not website:
+            warnings.warn('Please specify a website to operate')
+            exit(1)
+        self.team_id = f'websites/{website}'
 
     def query(self, directory: str = '', output: bool = True):
         """
@@ -158,10 +209,10 @@ class Session:
         else:
             warnings.warn('Upload failed' + res.text)
 
-    def upload_dir(self, abs_path: str, directory: str = ''):
+    def upload_dir(self, local_abs_path: str, directory: str = ''):
         """
         upload a directory and its subdirectories to specific directory
-        :param abs_path: absolute path of directory
+        :param local_abs_path: absolute path of directory
         :param directory: (optional) target directory, default to root directory
         :return: list of files, each file/dir as a dict
         """
@@ -169,11 +220,11 @@ class Session:
         if directory == '/':
             warnings.warn('You specified \'/\' as a directory name, which may cause unknown errors')
             exit(1)
-        path_to_dir = Path(abs_path)
+        path_to_dir = Path(local_abs_path)
         if not path_to_dir.is_dir():
-            warnings.warn('Invalid directory path: ' + abs_path)
+            warnings.warn('Invalid directory path: ' + local_abs_path)
             exit(1)
-        file_list = os.listdir(abs_path)
+        file_list = os.listdir(local_abs_path)
         if directory == '':
             dir_path = path_to_dir.name
         else:
@@ -249,6 +300,8 @@ class Session:
             return
         else:
             local_target_directory = f'teams/{self.team_id}/{directory}'
+            if self.is_staff:
+                local_target_directory = f'{self.team_id}/{directory}'
             os.makedirs(local_target_directory, exist_ok=True)
         # multi-threading operating
         threads = []
@@ -256,8 +309,10 @@ class Session:
             if item['Type'] == 'Folder':
                 if files_only:
                     continue
-                self.download_dir(item['Prefix'].split(f'teams/{self.team_id}/')[1], files_only)
-                continue
+                if self.is_staff:
+                    self.download_dir(item['Prefix'].split(f'{self.team_id}/')[1], files_only)
+                else:
+                    self.download_dir(item['Prefix'].split(f'teams/{self.team_id}/')[1], files_only)
             thread = threading.Thread(target=download_single_file,
                                       args=(item['Location'], local_target_directory))
             thread.start()
